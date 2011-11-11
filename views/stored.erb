@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title><%= title %>::stored</title>
+    <link rel="icon" href="http://ja.gravatar.com/userimage/14611836/d5caef2a5366cf647fc8fba3430e5854.png" type="image/png">
+    <!--[if lt IE 9]>
+    <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <script src=http://ie7-js.googlecode.com/svn/version/2.1(beta4)/IE9.js"></script>
+    <![endif]-->
+    <link rel="stylesheet" href="<%= @prefix %>/css/pc.css" type="text/css" media="screen" />
+<!--    
+    <link href="/<%= @prefix %>/iphone.css?<%=Time.now.to_i.to_s%>" rel="stylesheet" type= "text/css" media="only screen and (max-device-width: 480px)">
+-->    
+    <script type="text/javascript" src="<%= @prefix %>/jquery.js"></script>
+    <script src="http://cdn.jquerytools.org/1.2.6/jquery.tools.min.js"></script>   
+    
+<style>
+  #wrapper h2 {cursor :default }
+</style>  
+    <script>
+<% if @config == "sinatra" %>
+var  config = "sinatra";
+<% else %>
+var  config = "websocket";
+<% end %>
+</script>
+<style>
+  html{
+    overflow-y:auto;
+  }
+  h1{
+    margin:0;padding:0;
+  }
+  th{
+    border-bottom:1px solid;
+  }
+  header,#wrapper,footer{
+    width:750px;
+    margin :0 auto;
+    padding:0px;
+    font-size:16px;
+  }
+  table a:hover{
+     color:#E90955;
+  }
+  td{
+    padding:0px 0px 0px 0px;
+    border-bottom:1px solid;
+  }
+  tr:nth-child(even){
+/*     background:url('/musicdb_dev/highlight.png');*/
+  }
+  #apptitle a:visited,#apptitle a:hover{
+  }
+  table a{color:#111;}
+  #wrapper{margin-top:10px;}
+  .contents { width:700px;}
+  .controll { width:45px; text-align:center;}
+</style>  
+    
+  </head>
+  <body>
+    <header>
+      <div id="apptitle"><h1 class="logo"><a href='<%= @prefix %>/'><%= title %></a>::<a href='<%= @prefix %>/stored'>stored</a></h1></div>
+      <div class="clearboth"></div>
+      <div id="notice">stored list is temporary.</div>
+
+<!--      
+      <div id="m3u">
+          <a class='submit_button' href="/<%= @prefix %>">home</a>
+      </div>
+-->      
+    </header>
+          <script>
+var Handler = {
+   dell : function(_this){
+        $.ajax({  
+                   type   : "GET",
+                   async  : true,
+                   url    : $(_this).attr("href"),
+                   success: function(msg){
+//                       alert(msg.status + ":" + msg.msg );
+                       location.href = "<%= @prefix %>/stored";
+                   },
+                   error : function(){
+                   }
+               });
+   }
+}
+
+            
+          </script>
+    
+    <div id="wrapper">
+      <table id="statistics">
+        <tr>
+          <th class="controll">control</th>
+          <th class="contents">contents</th>
+        </tr>
+      <% @result.each do |line| %>
+        <tr>
+          <td>
+            <a href="<%= @prefix %>/files/<%= line.midsid %>" target="_blank">PLAY</a> 
+            <a href="<%= @prefix %>/api/files/set_store/delete/<%= line._id %>" onclick="Handler.dell(this);return false;">DELETE</a>
+          </td>
+          <td><%= line.titles.join('<br/>') if line.titles %></td>
+        </tr>
+      <% end %>
+      </table>
+    </div>
+    
+    <footer>
+      <p id="echo_pool" class="old"><%= Time.new.to_s %> modeverv＠gmai.com</p>
+    </footer>
+  </body>
+</html>
+
+

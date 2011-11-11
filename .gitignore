@@ -1,0 +1,8 @@
+log
+tmp/log/*
+tmp/pids/*
+tmp/sockets/*
+tmp/cache/*
+public/static
+
+

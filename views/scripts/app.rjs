@@ -1,0 +1,1053 @@
+/* JS for musicdb */
+var AppUtil = {
+    isMsIE : /*@cc_on!@*/false,
+    debug : function(s,l){
+//        console.log(s);
+        $.jGrowl(s, { life: l ? l : 1000 ,position : "bottom-left"});        
+    },
+    applyToSystem : function(){
+        String.prototype.r = String.prototype.replace;
+    }
+};
+
+// server
+var AppServer = {
+    init : function(){
+    },
+    search : function(qdata) {
+        qdata.p = parseInt(qdata.p);
+        qdata.per  = 50;
+        qdata.mode = "proxy";
+        qdata.dryp = qdata.p;
+        this._server.get('search', qdata,AppHandler.callback_search);
+    },
+    search_by_genre : function(qdata) {
+        qdata.per  = 50;
+        qdata.mode = "proxy";
+        qdata.dryp = qdata.p;
+        this._server.get('search_by_genre', qdata ,AppHandler.callback_search_by_genre);
+    },
+    genres : function(){
+        this._server.get('genres',{mode:'noproxy'},AppHandler.callback_genre);
+    },
+    reset : function (){
+        this._server._proxypool = {  };
+    },
+    _proxy :function(args){
+        this.proxy_status = args.proxy_status;
+        this.name         = args.name;
+        this.type         = args.type;
+        this.uri          = args.uri;
+        this.qdata        = args.qdata;
+        this.callback     = args.callback;
+    },
+    _status : null, 
+    _server : {
+        _proxypool  : { },
+        _prefetch_limit : 5,
+        // クエリの種類、重さ、サーバー側の健康状態によって(適当に)ダイナミックに
+        // 先読みの状況を変更することを考える。
+        // 答えの無い調整項目なのでパラメータについて深入りしない。
+        _handle_prefetch_limit : function(msec){
+            var mul = 1;
+            if     (msec > 10000)
+                AppServer._server._prefetch_limit =1 * mul;
+            else if(msec > 5000)
+            AppServer._server._prefetch_limit = 2 * mul;
+            else if(msec > 2500)
+            AppServer._server._prefetch_limit = 4 * mul;
+            else if(msec > 1000)
+            AppServer._server._prefetch_limit = 6 * mul;
+            else if(msec > 500)
+            AppServer._server._prefetch_limit = 8 * mul;
+            else if(msec > 250)
+            AppServer._server._prefetch_limit = 10 * mul;
+            else if(msec > 100)
+            AppServer._server._prefetch_limit = 12 * mul;
+            else if(msec > 10)
+            AppServer._server._prefetch_limit = 15 * mul;
+            else   
+                AppServer._server._prefetch_limit = 5 * mul;
+        },
+        fetch_next :function(type,uri,qdata,callback){ 
+//return false;
+            var next_qdata = {
+                qs   : qdata.qs,
+                p    : qdata.p + 1,
+                per  : qdata.per,
+                dryp : qdata.dryp,
+                mode : "proxy"
+            };
+
+            var name = this._get_name(type,uri,qdata);
+            if(this._proxypool[name]){
+                return AppServer._server.fetch_next(
+                    type,uri,next_qdata,callback         
+                );
+            }
+
+            if(qdata.dryp + AppServer._server._prefetch_limit < qdata.p){
+                return false;
+            }
+
+            var proxy = new AppServer._proxy({
+                                                 proxy_status : "new",
+                                                 name         : name,
+                                                 type         : type,
+                                                 uri          : uri,
+                                                 qdata        : qdata,
+                                                 callback     : callback
+                                             });
+            this._proxypool[name] = proxy;
+            var _this = this;
+            setTimeout(function(){
+                           _this[type](uri,
+                                       qdata,
+                                       AppServer._server._proxypool[name].proxy_callback,
+                                       proxy
+                                      );
+                       },1*3);
+            return false;
+        },
+        _get_name : function(type,uri,qdata){
+            return type + uri + qdata.qs + qdata.p;    
+        },
+        bakachk : { },
+        get : function(uri,qdata,callback,proxy){
+            var query = this._get_name("get",uri,qdata);
+            var nquery = this._get_name("get",uri,{qs:qdata.qs,p:parseInt(qdata.p)+1});
+            if(qdata.p == 1 && !AppServer._server.bakachk[query]){
+                AppServer._server.bakachk[query] = true;
+                this._proxypool[query] = true;
+            }else if(AppServer._server.bakachk[query]){
+//                return;
+            }
+
+            if(this._proxypool[query]){
+                if(this._proxypool[query].proxy_status == "response"){
+
+                    var json = this._proxypool[query].json;
+                    var status = this._proxypool[query].status;
+                    status["proxy"] = "proxy";
+                    if(this._proxypool[nquery] && this._proxypool[nquery].proxy_status == "response" )
+                        callback(status,json,"proxy");
+                    else{
+                        callback(status,json,"proxylast");
+                        if(status.next == 'yes')
+                            AppServer._server.fetch_next(
+                                "get",uri,qdata,callback         
+                            );
+                    }
+
+
+                    return;
+                }else if(this._proxypool[query].proxy_status == "response") {
+                    this._proxypool[query].callback_storategy = "with real";
+                    return;                             
+                }else if(this._proxypool[query].proxy_status == "new"){
+                    this._proxypool[query].proxy_status = "request";
+                }
+            }
+
+            var ajax_status = {
+                callback : callback,
+                proxy    : proxy,
+                kind     : "dry",
+                start    : new Date().getTime()
+            };
+
+            if(proxy) ajax_status.kind = "proxy";
+            var qdata_for_server = uri == "genres" ? null : {
+                 p : qdata.p,
+                 per:qdata.per,
+                 qs:qdata.qs
+            };
+            $.ajax({  
+                       type   : "GET",
+                       url    : AppServer._prefix() + "/" + uri ,
+                       data   : qdata_for_server,
+                       context: ajax_status,
+                       success: function(msg,textstatus,jqxhr){
+                           AppServer._status = msg[0];
+                           if(this.kind == "proxy"){
+                               this.proxy.proxy_callback(msg[0],msg[1],textstatus,jqxhr);
+                           }else{
+                               this.callback(msg[0],msg[1],"real");
+                           }
+                           var elapsed = new Date().getTime() - this.start;
+                           AppServer._server._handle_prefetch_limit(elapsed);
+                       },
+                       error:function(msg){
+                           AppServer._status = msg[0];
+                           AppHandler.callback_error();
+                       }
+                   });
+
+            var _this = this;
+            setTimeout(function(){
+                           //新しい検索のとき
+                           if(qdata.p == 1 && qdata.mode == "proxy"){ 
+                               _this.fetch_next(
+                                   "get",
+                                   uri,
+                                   qdata,
+                                   callback);
+                           }
+                       },2000);
+
+        },
+        post : function(uri,pdata,callback){
+            $.ajax({  
+                       type: "POST",
+                       url: AppServer._prefix() + "/" + uri ,
+                       data: "qs="+pdata,
+                       success: function(msg){
+                           AppServer._status = msg[0];
+                           callback(msg[0],msg[1]);
+                       },
+                       error:function(msg){
+                           AppServer._status = msg[0];
+                           AppHandler.callback_error();
+                       }
+                       
+                   });    
+        }
+    },
+    _prefix_app : "<%= @prefix %>",
+    _prefix_api : "/api",
+    _prefix : function(){ 
+        return this._prefix_app + this._prefix_api;
+    }
+};
+
+AppServer._proxy.prototype = {
+    callback_storategy : "process only",
+    proxy_callback : function(status,json,textstatus,jqxhr) {
+        AppUtil.debug("proxy request callback <br/>  " + this.uri + " qs:" + this.qdata.qs + " page:" + this.qdata.p  );
+
+        this.json = json;
+        this.status = status;
+        this.proxy_status = "response";
+        if(this.callback_storategy == "with real"){
+            this.callback(status,json);
+        }
+        if(status.next == 'yes'){
+            AppServer._server.fetch_next(
+                this.type,this.uri,this.qdata,this.callback
+            );
+        }
+    }
+};
+
+var AppPageElement = function(args){
+    this.name = args.name; //TODO hash関数必要。
+    this.kind = args.kind;
+    this._distination = $("#"+ args.kind).find('ul');
+    this.num = args.num;
+    this.path = args.path;
+    this.seed = 1 + Math.random() * 500;
+};
+
+AppPageElement.prototype = {
+    display:function(){
+        var _this = this;
+//        setTimeout(function(){
+                       _this._make_html();
+                       _this._update_num();
+                       _this._set_event(_this);
+                       _this._distination.append(_this.html);
+//                   },_this.seed);
+        return "ok";
+    },
+    insertFirst :function(){
+         this._make_html();
+         this._update_num();
+         this._set_event(this);
+         this._distination.prepend(this.html);
+    },
+    select : function(o){
+        this.html.addClass("selected");
+    },
+    unselect : function(o){
+        this.html.removeClass("selected");
+    },
+    _update_num :function(){
+        if(this.numa && this.num > this.numa ) this.num = this.numa ;
+        this.html.find('span').html("(" + this.num + ")");
+    },
+    _make_html:function(){
+        if(AppUtil.isMsIE || !this.html)
+            this.html = this.__elem_[this.kind](
+                {name:this.name,num:this.num},this);
+    },
+    _set_event_args:function(){
+        AppPage.current_selected[this.kind] = this.name;
+        switch(this.kind){
+        case "artist":
+            this.nkind = "genre" ;
+            if(this.name != "## ALL ##" && !AppPage.current_selected["genre"])
+              AppPage.current_selected["genre"] = this["genre"];
+            break;
+        case "album": 
+            this.nkind = "artist";
+            if(this.name != "## ALL ##" && !AppPage.current_selected["artist"])
+              AppPage.current_selected["artist"] = this["artist"];
+            if(this.name != "## ALL ##" && !AppPage.current_selected["genre"])
+              AppPage.current_selected["genre"] = this["genre"];
+            break;
+        }
+        if(this.name == "## ALL ##"){
+            this.nname = AppPage.current_selected[this.nkind];
+            this.html.removeClass("highlight");
+            AppPage.current_selected[this.kind] = null;
+        }
+    },
+    _set_event : function(obj){
+        var _this = this;
+        var selecta = function(target){
+            return _this[target];
+        };
+        var magickoffset = 168;
+        if(AppHandler.mode == "mode-search"){
+            this.html.
+                click(
+                    function(){
+                        _this._set_event_args();
+                        var ot = (this.offsetTop - magickoffset) < 0 ? 0 : this.offsetTop - magickoffset;
+                        if(_this.name == "## ALL ##"){
+                            if(!AppPage.current_selected[_this.nkind]){
+                                return;
+                            }
+                            AppHandler.
+                                acumeOrselect_from_(
+                                    _this.nkind,
+                                    _this.nname,
+                                    selecta,
+                                    _this.name,
+                                   ot);
+                        }else{
+                            AppHandler.
+                                acumeOrselect_from_(
+                                    _this.kind,
+                                    _this.name,
+                                    selecta,
+                                    null,
+                                    ot);
+                        }
+                        
+                    });
+        }else if (AppHandler.mode == "mode-genre"){
+            this.html.
+                click(
+                    function(){
+                        var ot = (this.offsetTop - magickoffset) < 0 ? 0 : this.offsetTop - magickoffset;
+                        _this._set_event_args();
+                        // acumeクリック時に 
+                        // genreかつallじゃないときは新規fetch
+                        if(_this.kind == "genre" && _this.name != "## ALL ##"){
+                            AppHandler.
+                                search_by_genre(
+                                    null,
+                                    null,
+                                    "dblclick",
+                                    _this.name);
+                            AppHandler.
+                                acumeOrselect_from_(
+                                    _this.kind,
+                                    _this.name,
+                                    selecta,
+                                    null,
+                                    ot);
+
+                        }else{
+                            // allの時は一つ上の階層から
+                            if(_this.name == "## ALL ##"){
+                                if(!AppPage.current_selected[_this.nkind])
+                                    return;
+                                AppHandler.
+                                    acumeOrselect_from_(
+                                        _this.nkind,
+                                        _this.nname,
+                                        selecta,
+                                        _this.name,
+                                        ot);
+                            }else{
+                                AppHandler.
+                                    acumeOrselect_from_(
+                                        _this.kind,
+                                        _this.name,
+                                        selecta,
+                                        null,
+                                        ot);
+
+                            }
+                        }
+                    });
+        }
+        var x = $("#echo2");
+        this.html.mouseover(function(){
+                                $(this).addClass('highlight'); 
+//                                x.html(_this.name + ":" + _this.path);
+//                                  if(_this.kind != "genre")
+//                                    AppUtil.debug(_this.name,10);
+                            });
+        this.html.mouseout(function(){ 
+                               $(this).removeClass('highlight');
+                           });
+    },
+    __elem_ : {
+        _li : function(kind,name,num,mode,obj){
+            var elem = "<li id='" + kind + "-"+ name +"'>";
+//            elem += "<h3>";
+            elem+= name;
+            if(mode == "genre" && obj.numa){
+                elem += "(" + obj.numa + ")";
+                obj.num -= 1;
+            }
+            if(mode !== "nonum" && name != "## ALL ##")
+                elem+= this._paren_span(num);
+//            elem += "</h3>";
+            if(mode == "nonum")
+                elem += this._file_button(obj.id,obj);
+            elem+= "</li>";
+            return elem;            
+        },
+        _paren_span : function(str){
+          return "<span>(" + str + ")</span>";
+        },
+        genre :function (o,obj){
+            return $(this._li("genre",o.name,o.num,"genre",obj));
+        },
+        artist :function (o){
+            return $(this._li("artist",o.name,o.num));
+        },
+        album:function (o){
+            return $(this._li("album",o.name,o.num));
+        },
+        title :function(o,obj){
+            return $(this._li("title",o.name,o.num,"nonum",obj));
+        },
+        _file_button : function(id,obj){
+            var elem = "<a class='file_link' href=\'javascript:void();\' style='float:right;' onclick='AppHandler.do_pretty(\"#{link}\");return false;'>#</a>";
+            var link = ('<%= @prefix %>/file/' + id + "");
+            elem = elem.replace('#{link}', link ); 
+            return elem;
+        }
+    }
+};
+
+var AppPage = {
+    init : function(){
+        $('h2').
+            click(
+                function(){
+                    var targ = $(this).closest('div').find('ul');
+                    var targs = targ.find('li');
+                    if($(this).attr({'sort':'desc'})){
+                        var ret = targs.sort(function(a, b){
+                                                 if($(a).text() == "## ALL ##")
+                                                     return -1;
+                                                 return 1;
+                                             });
+                        $(this).attr({'sort':'asc'});
+                    }else{
+                        var ret = targs.sort(function(a, b){
+                                                 if($(a).text() == "## ALL ##")
+                                                     return -1;
+                                                 return -1;
+                                             });
+                        $(this).attr({'sort':'desc'});
+                    }
+                    targ.append(ret);
+                });
+
+    },
+    current_selected_title_ids : [],
+    current_selected : { },
+        
+    register : function(status,json){
+        this._status = status;
+        for(var i=0;i<json.length;i++){
+             this._register(json[i]);
+             this.current_selected_title_ids.push(json[i]['_id']);
+//            (function(_this,je){
+//                 window.setTimeout(function(){
+//                                       _this._register(je);
+//                                       _this.current_selected_title_ids.push(je['_id']);
+//                                   },10);
+//             })(this,json[i]);
+        }
+    },
+    error_recover :function(str){
+        if(str){
+            $("#genre").find('ul').html("<h2>"+ str + "</h2>");
+            $("#album").find('ul').html("");
+            $("#title").find('ul').html("");
+            $("#m3u").fadeOut();
+        }
+        $("#grayout").fadeOut(2000);
+    },
+    _cleanup_page :function(){
+        $("#genre").find('ul').html('');
+        $("#artist").find('ul').html('');
+        $("#album").find('ul').html('');
+        $("#title").find('ul').html('');
+    },
+    _display_footer:function(){
+        $("#echo_pool").html("pool " + this._count + "  :modeverv＠gmail.com");
+    },
+    add_elem_of_ALL : function(){
+/*
+        if(this._elem_pool.artist["## ALL ##"])
+           if(!AppUtil.isMsIE)
+            this._elem_pool.artist["## ALL ##"].elem.insertFirst();
+        if(this._elem_pool.album["## ALL ##"])
+           if(!AppUtil.isMsIE)
+            this._elem_pool.album["## ALL ##"].elem.insertFirst();
+*/
+    },
+    display : function(){
+        this._cleanup_page();
+        this._display_footer();
+        var _this = this;
+var a = 5;
+        for(kind in _this._elem_pool)
+            for(x in _this._elem_pool[kind]){
+                if(x != "## ALL ##"){
+(function(_this,kind,x,a){
+window.setTimeout(function(){
+try{
+                    _this._elem_pool[kind][x].elem.display();
+} catch (x) {
+}
+},1 + a );
+})(this,kind,x,a);
+a+=5;
+                    if(kind == "title")
+                        _this.current_selected_title_ids.push(_this._elem_pool[kind][x].id);
+                }
+            }
+        if(this._status.total == 0){
+            this.error_recover("Found Nothing....");
+            return;
+        }
+        this.add_elem_of_ALL();
+        $("#m3u").fadeIn();
+        $("#grayout").fadeOut(100);
+    },
+    acume : function(o){
+        this._acume_select(o,"acume");
+    },
+    select : function(o){
+        if(o.squery != "## ALL ##"){
+            this.unselect(o.target);
+            this._acume_select({by:o.by,target:o.target,query:o.squery,mode:"select"},"select");
+        }
+    },
+    unselect : function(kind){
+        for(var i=0;i<AppPage._elem_selected[kind].length;i++){
+            this._elem_selected[kind][i].elem.unselect();
+        }
+        this._elem_selected[kind] = [];
+    },
+    reset : function(){
+//        this._count = 0;
+        this._elem_pool = {genre:{},artist:{},album:{},title:{}};
+        this._elem_selected = {genre:[],artist:[],album:[],title:[]};
+        $("#genre").find('ul').html('');
+        $("#artist").find('ul').html('');
+        $("#album").find('ul').html('');
+        $("#title").find('ul').html('');
+    },
+    _elem_pool : null,
+    _count : null,
+    __elem_pool_s : {genre:{},artist:{},album:{},title:{}},
+    __count_s:0,
+    __elem_pool_g : {genre:{},artist:{},album:{},title:{}},
+    __count_g:0,
+    change_mode : function(mode){
+       this._elem_pool = (mode == 'mode-search' ?
+          this.__elem_pool_s : this.__elem_pool_g );
+       this._count = (mode == 'mode-search' ?
+          this.__count_s : this.__count_g );
+    },
+    _elem_selected : {genre:[],artist:[],album:[],title:[]},
+    _status : null,
+    _register : function(je,mode){
+        if(mode == "genreonly"){
+            var target = ["genre"];
+        }else{
+            var target = ["genre","artist","album","title"];
+        }
+        for(var i=0;i<target.length;i++){
+            var kind = target[i];
+            if(kind != 'genre' 
+               && kind != "title"
+               && !this._elem_pool[kind]["## ALL ##"]
+              ){
+                var all = this._elem_pool[kind]["## ALL ##"] = {
+                    kind : kind,
+                    name : "## ALL ##",
+                    id  : null,
+                    elem:new AppPageElement({kind:kind,name:"## ALL ##",num:1,path:je.path})
+                };
+                  all.genre = "## ALL ##";
+                  all.elem.genre = "## ALL ##";
+                  all.artist = "## ALL ##";
+                  all.elem.artist = "## ALL ##";
+                  all.album = "## ALL ##";
+                  all.elem.album = "## ALL ##";
+                  all.title = "## ALL ##";
+                  all.elem.title = "## ALL ##";
+              }
+            if(kind == "title" && !this._elem_pool.title[je.title]){
+                this._count += 1;
+            }
+
+            if(this._elem_pool[kind][je[kind]]){
+//                if(mode != "genreonly" || kind != 'genre')
+                    this._elem_pool[kind][je[kind]].elem.num += 1;
+
+                var _this = this._elem_pool[kind][je[kind]]; 
+                // ["genre"]["pop"] = {artist:{"くるり","",album:{"ファンデリア","図鑑"}....
+                // ["artist"]["くるり"] = {album:{"ファンデリア","図鑑"}...
+                switch(kind){
+                case "genre":
+                case "artist":
+                    _this.genre[je.genre]   = true;
+                case "album":
+                    _this.artist[je.artist] = true;
+                case "title":
+                    _this.album[je.album]   = true;
+                    _this.title[je.title]   = true;
+                }
+
+            }else {//koko pool.genre.ROCK
+                var tmp = this._elem_pool[kind][je[kind]] = {
+                    kind : kind, //genre
+                    name : je[kind], // rock
+                    id  : kind != "title" ? null : je['_id'],
+                    elem:new AppPageElement({kind:kind,name:je[kind],num:1,path:je.path}),
+                    title:{},
+                    album:{},
+                    artist:{},
+                    genre:{}
+                };
+                switch(kind){
+                case "title":
+                    tmp.title[je.title] = true;
+                    tmp.elem.id = je['_id'];
+                    tmp.elem.title = je.title;
+                case "album":
+                    tmp.album[je.album] = true;
+                    tmp.elem.album = je.album;
+                case "artist":
+                    tmp.artist[je.artist] = true;
+                    tmp.elem.artist = je.artist;
+                case "genre":
+                    tmp.genre[je.genre] = true;
+                    tmp.elem.genre = je.genre;
+                }
+                if(mode == "genreonly" && kind == "genre")
+                    tmp.elem.numa = je.num;
+
+            }
+        }
+    },
+    _print_pagination :function(mode){
+        var api = '';
+        if(mode == 'genre')
+            api = '_by_genre';
+        var html = "";
+        if(this._status.next == 'yes')
+            html += "<input type='button' class='submit_button fl' onclick='AppHandler.search" + api +  "(\"" + (this._status.page +1) +"\",\"persist\");' value='More'/>";
+        $("#pagination").html(html);
+    },
+    _acume_select : function(o,mode){
+        var acumed_array = AppPage.__return_args(o);
+        if(mode == "acume"){
+            this.current_selected_title_ids = [];
+            $("#"+o.target).find('ul').html("");
+        }
+        for(var i=0;i<acumed_array.length;i++){
+            if(mode == "select"){
+                acumed_array[i].elem.select();
+                this._elem_selected[o.target].push(acumed_array[i]);
+            }
+            if(mode == "acume"){
+                acumed_array[i].elem.display();
+                if(o.target == "title" )
+                    this.current_selected_title_ids.push(acumed_array[i].id);
+            }
+        }
+    },
+    __return_args :function(o){ //need mod
+        var target_collection = this._elem_pool[o.target];
+        if(o.mode == 'select'){
+            var acumed_array = this.__query({
+                                                from:target_collection,
+                                                target:o.target,
+                                                query:o.query
+                                            });
+        }else{
+            var acumed_array = this.__query({
+                                                from:target_collection,
+                                                target:o.by,
+                                                query:o.query
+                                            });
+        }
+        return acumed_array;
+    },
+    __query : function(o){
+        var ret = [];
+        if(AppHandler.mode == "mode-search"){
+            for(x in o.from){
+//                if(o.from[x][o.target] == o.query){
+                if(o.from[x][o.target][o.query]){
+                    ret.push(o.from[x]);
+                }
+            }
+        }else{ // page_mode == "genre"
+            var current_genre = AppHandler.current_genre;
+            for(x in o.from){
+                if(o.from[x][o.target][o.query]){
+                    if(current_genre && o.target != "genre"){
+                        if(o.from[x]["genre"][current_genre]){
+                            ret.push(o.from[x]);
+                        }
+                    }else{
+                        ret.push(o.from[x]);
+                    }
+                }
+            }
+        }
+        return ret;
+    }
+};
+var AppPageGenre = {
+    _genre_pool : {},
+    register : function(status,json){
+        AppPage._status = { next:'no',total:1};
+        for(var i=0;i<json.length;i++){
+            this._register(json[i]);
+        }
+    },
+    register_elem : function(status,json){
+        AppPage.register(status,json);
+    },
+    display : function(){
+        AppPage.display();
+    },
+    display_genre : function(){
+        AppPage.display();
+    },
+    _register : function(je){
+        je.kind = "genre";
+        je.genre = je.name;
+        AppPage._register(je,"genreonly");
+    }
+};
+
+var AppHandler = {
+    mode : "mode-genre",
+    current_genre : null,
+    current_genre_page : {},
+    change_mode :function(mode){
+        AppPage.reset();
+            $("#artist h2").css({"padding-top":0});
+            $("#album h2").css( {"padding-top":0});
+            $("#title h2").css( {"padding-top":0});
+        if(AppHandler.mode == 'mode-genre'){
+            AppHandler.mode = 'mode-search';
+            AppPage.change_mode('mode-search');
+            $("#frm_search").fadeIn(1000);
+//            $("#b_mode").val('change to genre');
+            $("#b_mode").text('genre');
+            $("#b_mode").css('font-size','18px');
+            $("#f_query").val("FeelingLucky");
+            $("#b_search").click();
+        }else if(AppHandler.mode == 'mode-search'){
+            AppHandler.mode = 'mode-genre';
+            AppPage.change_mode('mode-genre');
+            $("#frm_search").fadeOut(0);
+//            $("#b_mode").val('change to search');
+            $("#b_mode").text('search');
+            $("#b_mode").css('font-size','18px');
+
+            AppHandler.genres();
+        }
+    },
+    p :null,
+    search : function (p,mode) {
+        if(!p){ 
+            if(AppHandler._qstring == $("#f_query").val()){
+                p = AppHandler.p + 1;
+            }else{
+                p = 1;
+            }
+        }
+        AppHandler.p = p;
+
+        if(p == 1){
+            AppPage.current_selected_title_ids = [];
+        }
+
+        if(mode != "persist" && mode != "proxy" && mode != "proxylast"){
+            AppPage.reset();
+            AppHandler._qstring = $("#f_query").val();
+        }else{
+            $("#f_query").val(AppHandler._qstring);
+        }
+        var qstring = $("#f_query").val();
+
+        if(AppHandler.ended_search[qstring]){
+           return;
+        }
+
+        $("#grayout").fadeIn(10);
+        var qdata = {
+            qs : qstring,
+            p : p
+        };        
+        AppServer.search(qdata);
+    },
+    search_by_genre : function (p,mode,yurai,yurai_name) {
+        p = null;
+        if(yurai == "dblclick"){
+            AppHandler.current_genre = yurai_name;
+        }
+        if(yurai == "proxy"){
+            
+        }
+        var qstring = AppHandler.current_genre;        
+        if(AppHandler.ended_genre[qstring]){
+            AppPage._display_footer();
+            return;
+//            $("#grayout").fadeIn(10);
+//            var selecta = function(target){
+//                return qstring;
+//            };
+//            AppHandler.acumeOrselect_from_("genre",qstring,selecta,null,null,ot);
+//            $("#grayout").fadeOut(10);
+//            return;
+        }
+
+        if(this.current_genre_page[qstring]){
+            this.current_genre_page[qstring] += 1;
+        }else{
+            this.current_genre_page[qstring] = 1;
+        }
+        p = this.current_genre_page[qstring];
+
+        var qdata = {
+            qs : qstring,
+            p : p
+        };
+
+        $("#grayout").fadeIn(0);
+        AppServer.search_by_genre(qdata);
+    },
+    genres :function ()    {
+        $("#grayout").toggle(100);
+        AppServer.genres();
+    },
+    set_cookie :function(){
+        var ids = AppPage.current_selected_title_ids.join(' ');
+        $("#m3u_ids").val(ids);
+        $.ajax({  
+                   type   : "POST",
+                   async  : false,
+                   data   : {"mids":ids},
+                   url    : "<%= @prefix %>/api/files/set_mids" ,
+                   success: function(msg){
+$.prettyPhoto.open('<%= @prefix %>/files?midskey=' + msg.midskey,
+                   'files',
+                   "<a midskey='" + msg.midskey +"' href=\"<%= @prefix %>/files?midskey=" + msg.midskey + "\" target=\"_blank\" onclick='AppHandler.wopen(this);return false'> link </a>"
+                  );
+                   }
+               });
+    },
+    pclose : function(){
+        try{
+            $("iframe").contents().find("audio").get(0).pause();
+        } catch (x) {
+        }
+        try{
+            $("iframe").contents().find("audio").get(0).src = "";
+        } catch (x) {
+
+        }
+    },
+    wopen : function(_this){
+      $.prettyPhoto.close();
+      window.open('<%= @prefix %>/files?midskey=' + $(_this).attr("midskey"), 'new' );
+    },
+    get_m3u : function (){
+        $('#title li').each(function(){
+                                $(this).addClass('selected');
+                                $(this).fadeOut(500 + Math.random()*1000);
+                            });
+        $("#grayout").toggle(100);
+        var ids = AppPage.current_selected_title_ids.join(' ');
+        $("#m3u_ids").val(ids);
+        AppHandler.callback_m3u();        
+        return false;
+    },
+    do_pretty :function (link){
+        $.prettyPhoto.open(
+                   link,
+                   'pretty',
+                   "<a href=\"" + link + "\" target=\"_blank\" onclick='$.prettyPhoto.close();' > link </a>"
+        );
+    },
+    acumeOrselect_from_ : function(kind,query,selecta,all,ot) {
+        if(AppHandler.mode=="mode-genre" 
+           && kind == "genre" 
+           && all != "## ALL ##") {
+            AppHandler.current_genre = selecta("genre");
+        }
+        var a = AppPage;
+        var divs = ["genre","artist","album","title"];
+        var flg = true;
+        for(var i=0;i<divs.length;i++){
+            if(flg){
+                a.select({target:divs[i],by:kind,query:query,squery:selecta(divs[i]) });
+            }else{
+                a.unselect(divs[i]);
+                a.acume ({target:divs[i],by:kind,query:query});
+                $("#" + divs[i] + " h2").css({"padding-top":ot});
+            }
+
+            if(divs[i] == kind)
+                flg = false;
+
+            
+        }
+        AppPage.add_elem_of_ALL();
+        if(kind == "genre"){
+           AppPage._elem_pool["genre"][query].elem._update_num();
+        }
+    },
+    callback_error : function(str){
+        AppPage.error_recover(str);
+    },
+    ended_search : { },
+    callback_search :function(status,json,mode){
+        if(status.next == "no")
+            AppHandler.ended_search[status.qs] = true;
+        if(status["proxy"] && status["next"] == "yes"){
+//setTimeout(function(){
+            AppHandler.search(parseInt(status.page) + 1,"proxy");
+//},10);
+        }
+        AppPage.register(status,json);
+
+        if(mode == "real" || status["next"] == "no" || mode == "proxylast"){
+//            $("#grayout").fadeIn(0);        
+
+            AppPage._print_pagination();
+            AppPage.display();
+            var ids = AppPage.current_selected_title_ids.join(' ');
+            $("#m3u_ids").val(ids);
+
+            $("#artist h2").css({"padding-top":0});
+            $("#album h2").css( {"padding-top":0});
+            $("#title h2").css( {"padding-top":0});
+
+            $("#grayout").fadeOut(0);        
+
+        }
+        return false;
+    },
+    ended_genre : {},
+    callback_search_by_genre :function(status,json,mode){
+
+        if(status.next == "no")
+            AppHandler.ended_genre[status.qs] = "ended";
+        if(status["proxy"] && status.next == "yes"){
+            setTimeout(function(){
+                           status["proxy"] = true;
+                           AppHandler.search_by_genre(null,null,"proxy",status.qs);
+                       },10);
+        }
+        AppPageGenre.register_elem(status,json);
+        AppPage._print_pagination('genre');
+
+        if(mode == "real" || status.next == "no" || mode == "proxylast"){ 
+//            $("#grayout").fadeIn(0);        
+
+            var selecta = function(target){
+                return status.qs;
+            };
+            AppPage._display_footer();
+            AppHandler.acumeOrselect_from_("genre",status.qs,selecta);
+
+            var ids = AppPage.current_selected_title_ids.join(' ');
+            $("#m3u_ids").val(ids);
+            $("#grayout").fadeOut(0);        
+        }
+        return false;
+    },
+    callback_genre :function(status,json){
+        AppPageGenre.register(status,json);
+        AppPageGenre.display_genre();
+    },
+    callback_m3u :function(json){
+        $("#grayout").toggle(100);
+        $('#title li').each(
+            function(){
+                var _this = this;
+                setTimeout(function(){ $(_this).fadeIn(1000); },500 + Math.random()*1000);
+                setTimeout(function(){ $(_this).removeClass('selected'); },1000+ Math.random()*1000);
+            });
+    }
+};
+function init(){
+    AppUtil.applyToSystem();
+    $.fn.prettyPhoto(); 
+
+    AppPage.init();
+
+//    AppHandler.change_mode();
+
+    AppPage.change_mode('mode-genre');
+    AppHandler.genres();
+}
+
+/* test */
+var AppTest = {
+    search :function (){
+        $("#f_query").val("mp3");
+        $("#b_search").click();
+    },
+    feeling_lucky :function (){
+        $("#f_query").val("FeelingLucky");
+        $("#b_search").click();
+    },
+    search_by_genre :function (){
+        AppHandler.search_by_genre("Alternative");
+    },
+    genre : function (){
+        AppHandler.genres();
+    },
+    change_mode : function(){
+      AppHandler.change_mode();
+    },
+    do_test : function(){
+        //        this.change_mode();
+        //              AppTest.search();
+        //     AppTest.feeling_lucky();
+        //ok      AppTest.search_by_genre();
+//        $("#f_query").val("くるり");
+//        $("#b_search").click();
+//        $("#grayout").fadeOut();
+    }
+};
+$(function(){
+      init();
+      AppTest.do_test();
+      $.prettyPhoto.open('<%= @prefix %>/welcome',
+                   'files'
+                  );
+
+  });

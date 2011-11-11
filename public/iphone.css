@@ -1,0 +1,11 @@
+/* reset */
+body {
+    font-size:1.5em;
+    line-height:1.5;
+    color:#333;
+    background:#fff url('/mediadb2/back2.png');
+}
+#vlc1{
+   position:absolute;
+   top:0;
+}

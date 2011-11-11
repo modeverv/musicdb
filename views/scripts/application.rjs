@@ -1,0 +1,724 @@
+/* JS for musicdb */
+var AppUtil = {
+    isMsIE : /*@cc_on!@*/false,
+    debug : function(s,l){
+        //        console.log(s);
+        if(!l){l = 10;}
+        $.jGrowl(s, { life: parseInt(l) ,position : "bottom-left"});        
+    },
+    applyToSystem : function(){
+        String.prototype.r = String.prototype.replace;
+    }
+};
+
+/* server */
+var AppServer = {
+    init : function(){
+        this._server._proxypool = {  };
+    },
+    make_qdata : function(qdata){
+        qdata.p = parseInt(qdata.p);        
+        qdata.dryp = qdata.p;
+        qdata.per = 100;
+        qdata.mode = "proxy";
+        return qdata;
+    },
+    search : function(qdata) {
+        this._server.get('search', this.make_qdata(qdata),AppHandler.callback_search);
+    },
+    search_by_genre : function(qdata) {
+        this._server.get('search_by_genre',this.make_qdata(qdata) ,AppHandler.callback_search_by_genre);
+    },
+    genres : function(){
+        this._server.get('genres',{mode:'noproxy'},AppHandler.callback_genre);
+    },
+    _proxy :function(args){ for(x in args){ this[x] = args[x]; } },
+    _status : null, 
+    _server : {
+        _proxypool  : { },
+        _prefetch_limit : 1,
+        // クエリの種類、重さ、サーバー側の健康状態によって(適当に)ダイナミックに
+        // 先読みの状況を変更することを考える。
+        // 答えの無い調整項目なのでパラメータについて深入りしない。
+        _handle_prefetch_limit : function(msec){
+            var mul = 10;
+            if (msec > 10000)
+                AppServer._server._prefetch_limit =1 * mul;
+            else if(msec > 5000)
+            AppServer._server._prefetch_limit = 2 * mul;
+            else if(msec > 2500)
+            AppServer._server._prefetch_limit = 4 * mul;
+            else if(msec > 1000)
+            AppServer._server._prefetch_limit = 6 * mul;
+            else if(msec > 500)
+            AppServer._server._prefetch_limit = 8 * mul;
+            else if(msec > 250)
+            AppServer._server._prefetch_limit = 10 * mul;
+            else if(msec > 100)
+            AppServer._server._prefetch_limit = 12 * mul;
+            else if(msec > 10)
+            AppServer._server._prefetch_limit = 15 * mul;
+            else   
+                AppServer._server._prefetch_limit = 5 * mul;
+        },
+        fetch_next :function(type,uri,qdata,callback){ 
+            //            return false;
+            var next_qdata = {
+                qs   : qdata.qs,
+                p    : qdata.p + 1,
+                per  : qdata.per,
+                dryp : qdata.dryp,
+                mode : "proxy"
+            };
+
+            var name = this._get_name(type,uri,qdata);
+            if(this._proxypool[name]){
+                return AppServer._server.fetch_next(
+                    type,uri,next_qdata,callback );
+            }
+
+            if(qdata.dryp + AppServer._server._prefetch_limit < qdata.p)
+                return false;
+
+            var proxy = new AppServer.
+                _proxy({
+                           proxy_status : "new",
+                           name         : name,
+                           type         : type,
+                           uri          : uri,
+                           qdata        : qdata,
+                           callback     : callback
+                       });
+
+            this._proxypool[name] = proxy; //poolに登録
+            var _this = this;
+            setTimeout(function(){
+                           _this[type](uri,
+                                       qdata,
+                                       AppServer._server._proxypool[name].proxy_callback,
+                                       proxy
+                                      );
+                       },5);
+            return false;
+        },
+        _get_name : function(type,uri,qdata){
+            return type + uri + qdata.qs + qdata.p;    
+        },
+        bakachk : { },
+        get : function(uri,qdata,callback,proxy){
+            var query = this._get_name("get",uri,qdata);
+            var nquery = this._get_name("get",uri,{qs:qdata.qs,p:parseInt(qdata.p)+1});
+            if(qdata.p == 1 && !AppServer._server.bakachk[query]){
+                AppServer._server.bakachk[query] = true;
+                this._proxypool[query] = true;
+            }else if(AppServer._server.bakachk[query]){
+                //                return;
+            }
+
+            if(this._proxypool[query]){
+                if(this._proxypool[query].proxy_status == "response"){
+                    var json = this._proxypool[query].json;
+                    var status = this._proxypool[query].status;
+                    status["proxy"] = "proxy";
+                    if(this._proxypool[nquery] && this._proxypool[nquery].proxy_status == "response" )
+                        callback(status,json,"proxy");
+                    else{
+                        callback(status,json,"proxylast");
+                        if(status.next == 'yes')
+                            AppServer._server.fetch_next(
+                                "get",uri,qdata,callback         
+                            );
+                    }
+                    return;
+                }else if(this._proxypool[query].proxy_status == "response") {
+                    this._proxypool[query].callback_storategy = "with real";
+                    return;                             
+                }else if(this._proxypool[query].proxy_status == "new"){
+                    this._proxypool[query].proxy_status = "request";
+                }
+            }
+
+            var ajax_status = {
+                callback : callback,
+                proxy    : proxy,
+                kind     : "dry",
+                start    : new Date().getTime()
+            };
+
+            if(proxy) ajax_status.kind = "proxy";
+            var qdata_for_server = uri == "genres" ? null : {
+                p : qdata.p,
+                per:qdata.per,
+                qs:qdata.qs
+            };
+            $.ajax({  
+                       type   : "GET",
+                       url    : AppServer._prefix() + "/" + uri ,
+                       data   : qdata_for_server,
+                       context: ajax_status,
+                       success: function(msg,textstatus,jqxhr){
+                           var elapsed = new Date().getTime() - this.start;
+                           AppServer._server._handle_prefetch_limit(elapsed);
+
+                           AppServer._status = msg[0];
+                           if(this.kind == "proxy"){
+                               this.proxy.proxy_callback(msg[0],msg[1],textstatus,jqxhr);
+                           }else{
+                               this.callback(msg[0],msg[1],"real");
+                           }
+                       },
+                       error:function(msg){
+                           AppServer._status = msg[0];
+                           $("grayout").fadeOut(0);
+                       }
+                   });
+
+            var _this = this;
+            setTimeout(function(){
+                           //新しい検索のとき
+                           if(qdata.p == 1 && qdata.mode == "proxy"){ 
+                               _this.fetch_next(
+                                   "get",
+                                   uri,
+                                   qdata,
+                                   callback);
+                           }
+                       },2000);
+
+        }
+    },
+    _prefix_app : "<%= @prefix %>",
+    _prefix_api : "/api",
+    _prefix : function(){ 
+        return this._prefix_app + this._prefix_api;
+    }
+};
+
+AppServer._proxy.prototype = {
+    callback_storategy : "process only",
+    proxy_callback : function(status,json,textstatus,jqxhr) {
+        if(this.qdata.p % 10 == 0)
+          AppUtil.debug( "proxy request callback <br/>  " + this.uri + " qs:" + this.qdata.qs + " page:" + this.qdata.p  );
+
+        this.json = json;
+        this.status = status;
+        this.proxy_status = "response";
+        if(this.callback_storategy == "with real"){
+            this.callback(status,json);
+        }
+        if(status.next == 'yes'){
+            AppServer._server.fetch_next(
+                this.type,this.uri,this.qdata,this.callback
+            );
+        }
+    }
+};
+
+/* PAGE */
+var AppPageElements = function (){
+    this.init();
+};
+AppPageElements.prototype = {
+    init : function(){
+        this._elements = { genre:{},artist:{},album:{},title:{} };
+        this.counts = 0;
+    },
+    find :function(k) {
+        this._elements[k].query = this.query;
+        this._elements[k].is = this.is;
+        return this._elements[k];
+    },
+    query : function(m){
+        this.selecta = function(finder,_this,qs){
+            var ret = [];    
+            for(x in _this)
+                if(qs == _this[x][finder])
+                    ret.push(_this[x]);
+            return ret;
+        };
+        this.finder = m;
+        return this;
+    },
+    is :function (qs){ return this.selecta(this.finder,this,qs); },
+    add : function(args){
+        var elem = new AppPageElement(args);
+        if(args.genre){
+            for(x in this._elements){
+                var idx = x=="title"? args["_id"] : args[x];
+                if(!this._elements[x][idx]){
+                    this._elements[x][idx] = elem;
+                    elem[x + "num"] = 1;
+                }else
+                    this._elements[x][idx][x + "num"] += 1;
+            }
+        }
+    }
+};
+var AppPageElement = function(args){
+    for(x in args)
+        this[x] = args[x] ;
+    this.init();
+};
+var AppPageElementHandler = {
+    click : function(_this){
+        var jthis = $(_this);
+        var kind = jthis.attr("kind");
+        this.__padding(_this,kind);
+        jthis.addClass("selected");
+        AppPage.element_click(jthis,kind);
+    },
+    onmover : function(_this){
+        var jthis = $(_this);
+        var kind = jthis.attr("kind");
+        if(AppPage.status.followflag && kind != "title"){
+            if(AppPage.status.mode == "genre" && kind == "genre"){
+            }else{
+                this.__padding(_this,kind);
+                AppPage.element_click(jthis,kind);
+            }
+        }
+        $(_this).addClass("highlight");
+    },
+    onmout : function(_this){
+        $(_this).removeClass("highlight"); 
+    },
+    Kclick : function(_this){
+        var li = $(_this).closest("li");
+        var kind = li.attr("kind");
+        if(kind != "title"){
+            var name = li.attr("id").replace(kind + "-" ,"");
+            AppHandler.web(kind,name);
+        }
+        else{
+            var id = li.attr("_id");
+            AppHandler.title_click(id);
+        }
+    },
+    Mclick : function(_this){
+        var li = $(_this).closest("li");
+        var kind = li.attr("kind");
+        var name = li.attr("id").replace(kind + "-" ,"");
+        AppHandler.m3u(kind,name);
+    },
+    __magic : function(kind){
+        //        return kind == "genre" ? 151 :149;
+        return kind == "genre" ? 138 :138;
+    },
+    __padding: function(_this,kind){
+        AppPage.target[kind].find(".selected").removeClass("selected");
+        var magic = this.__magic(kind);
+        var ot = _this.offsetTop - magic;
+        ot = ot < 0 ? 0 : ot;
+        for(var i=0,t=AppPage.get_sub(kind),l=t.length;i<l;i++){
+            $("#" + t[i] + " h2").css({"padding-top":ot});
+            AppPage.target[t[i]].find(".selected").removeClass("selected");
+        }
+    }
+};
+AppPageElement.prototype = {
+    init : function(){
+        this._maked = {genre:{},artist:{},album:{},title:{}};
+    },
+    display_in_ : function(kind){
+        if(kind == "title" && typeof this["title"] == "undefined")
+            return false;
+        return this._make_html_in_(kind);
+    },
+    _make_html_in_ : function(kind){
+        if(this._maked[kind][kind + "-" + this[kind]] && !AppUtil.isMsIE){
+            return this._maked[kind][kind + "-" + this[kind]];
+        }
+        var ret = "<li>dummy</li>";
+        var _this = this;
+        ret = this.__html_[kind](this,kind);
+        this._maked[kind][kind + "-" + this[kind]] = ret;
+        return ret;
+    },
+    __html_ : {
+        _call :function(_this,kind){
+            var num = _this[kind+"num"];
+            if(AppPage.status.mode == "genre" && kind == "genre")
+                num = _this["genreanum"];
+            var elem =  $("<li " + 
+                          " onclick=\"AppPageElementHandler.click(this);\"" + 
+                          " onmouseover=\"AppPageElementHandler.onmover(this);\" " + 
+                          " onmouseout=\"AppPageElementHandler.onmout(this)\" " + 
+                          ">" +
+                          _this[kind] + 
+                          (kind != "title" ? ("(<div class='old'>" + num + "</div>)") : "") + 
+                          "<span class='p'" + 
+                          " onclick=\"AppPageElementHandler.Kclick(this)\"" + 
+                          " >w</span>" + 
+                          ( kind != "title" ?
+                            "<span class='m' style='margin-right:5px;' " + 
+                            " onclick=\"AppPageElementHandler.Mclick(this)\"" + 
+                            " >m</span>" : "") +
+
+                          "</li>");
+            elem.attr({"id": kind + "-" + _this[kind] });
+            elem.attr({"kind": kind });
+            elem.kind = kind;
+            return elem;
+        },
+        genre  : function(_this,kind){ return this._call(_this,kind); },
+        artist : function(_this,kind){ return this._call(_this,kind); },
+        album  : function(_this,kind){ return this._call(_this,kind); },
+        title  : function(_this,kind){
+            return this._call(_this,kind)
+                .attr({"_id": _this._id });
+        }
+    }
+};
+
+//###################################
+var AppPage = {
+    /* 初期化 検索からgenreの時なども呼ばれる */
+    init : function(KIND){
+        this.elements = new AppPageElements();
+        if(!this.target){
+            this.target = {
+                /* ポインタショートカット */            
+                genre  :$("#genre ul"),
+                artist :$("#artist ul"),
+                album  :$("#album ul"),
+                title  :$("#title ul")
+            };
+        }
+        for(x in this.target){
+            $("#" + x + " h2").css({"padding-top":0});
+            this.target[x].html("");
+        }
+
+        this.status = {
+            mode : KIND
+            /* ここに色々情報を書きこんでいく */            
+        };
+    },
+    // つど生成+いイベント取り付けするとコストがありえないことになる。
+    // かといってhide/showで画面に残しておくと要素数が10000とかを超えると死亡する。
+    // 方法=>文字列で関数を持ってhtmlにon..として書いてしまう。
+    // TODO いけた。待受が情報有りき作られているのを削る。
+    element_click : function(jhtml,kind){
+        var name = jhtml.attr("id").replace(kind + "-" ,"");
+        //        if(!kind){ kind =  $(html).attr("kind") ;}
+        if(this.status.mode == "genre" && kind == "genre")
+            return AppHandler.search({by:"genre",qs:name});
+
+        var ar = this.get_sub( kind ) ;
+        var ht;
+        for(var i=0,l=ar.length;i<l;i++){
+            (function(x,ar,i,_this,name,kind,ht){
+                 setTimeout(
+                     function(){
+                        _this.target[ar[i]].hide();
+                         var hi = _this.elements.find(ar[i]).query(kind).is(name);
+                         //                         _this.target[ar[i]].find("li").hide();
+                         _this.target[ar[i]].html("");
+                         for(x in hi){
+                             if(hi[x].display_in_)
+                                 _this.target[ar[i]].append( hi[x].display_in_(ar[i]) );
+                         }
+                         if(ar[i]=="title")
+                             ht=hi;
+                     _this.target[ar[i]].show();
+                     },1+i);
+             })(x,ar,i,this,name,kind,ht);
+        }
+        AppHandler.set_ids(ht);
+        return false;
+    },
+    get_sub : function(key){ return (key == "title") ? [] : "genre|artist|album|title".split(key + "|")[1].split("|"); },
+    get_parent : function(key){ return (key == "genre") ? [] : "genre|artist|album|title".split("|" + key)[0].split("|"); },
+    registerg : function(status,json){
+        this.status.s_status = status;
+        for(var i=0,l=json.length;i<l;i++){
+            this.elements.add(({
+                                   genre:json[i].name,
+                                   genreanum : json[i].num
+                               }));
+        }
+    },
+    register : function(status,json){
+        this.status.s_status = status;
+        for(var i=0,l=json.length;i<l;i++){
+            this.elements.add(json[i]);
+        }
+        this.elements.counts += json.length;
+    },
+    make_genre_pain :function(){
+        var gh = this.elements.find("genre");
+        rets = []
+        for(x in gh){
+            if(gh[x].display_in_){
+                rets.push([gh[x]["genreanum"],gh[x].display_in_("genre")]);
+            }
+        }
+        rets.sort(function(a,b){return a[0] < b[0];});
+        for(var i=0,l=rets.length;i<l;i++){
+           this.target.genre.append(rets[i][1]);
+        }
+    },
+    _pain_by : function(h,kind){
+        //        this.target[kind].hide();
+        this.target[kind].html("");
+        var c = 0;
+        for(x in h){
+            c+=1;
+            if(h[x].display_in_){
+                this.target[kind].append( h[x].display_in_(kind) );
+            }
+        }
+
+        if(kind == "title"){
+            AppPage.status.followflag =  c > 5000 ? false:true;
+            if(AppPage.status.followflag == false)
+                AppUtil.debug("<h3>Many Elements!<br/> Follow Mouse Disabled.</h3>",5000);
+            else
+                AppUtil.debug("<h3>Follow Mouse Enabled.</h3>",5000);
+        }
+        AppHandler.grayout(kind);
+    },
+    pain_by : function(args){
+        if(this.status.mode == "genre" && args.kind != "genre")
+            var h = this.elements.find(args.kind).query("genre").is(args.status.qs); 
+        else
+            var h = this.elements.find(args.kind);
+        this._pain_by(h,args.kind);
+        return h;
+    }
+};
+
+var AppHandler = {
+    init : function(){
+        this.status ={ids :[],ids_title :[]};
+        this.current_qs ={    };
+        this.current_sqs = null;
+    },
+    title_click : function(id){
+        this.do_pretty('<%= @prefix %>/file/' + id );
+    },
+    grayout : function(kind){
+        AppHandler.status.displaystack[kind] = false;
+        var flg = true;
+        for(x in AppHandler.status.displaystack)
+            if(AppHandler.status.displaystack[x])
+                flg = false;
+        if(flg)
+            $("#grayout").fadeOut(0);
+    },
+    search : function(args){
+        //        args = {
+        //           by:"genre"|"search"|"more"
+        //           qs: 検索文字列 searchの時は用意
+        //           p : いまから用意
+        //        }
+
+        //検索の時 
+        if(args.by=="search"){
+            args.qs = $("#f_query").val();
+            if(args.qs == "")
+                return false;
+            this.current_sqs = "s:" + args.qs;
+            this.current_qs[this.current_sqs] = 1;
+            args.p = this.current_qs[this.current_sqs];
+            AppPage.init("search");
+            $("#to_genre").show();
+        }else if(args.by=="more"){
+            args.qs = this.current_sqs.replace(/^s\:/,"");
+            $("#f_query").val(args.qs);
+            args.p = (this.current_qs[this.current_sqs] += 1);
+        }else{
+            $("#b_more").hide();
+            if(this.current_qs[args.qs]){
+                if(this.current_qs[args.qs] == "ended"){
+                    AppUtil.debug(args.qs + " is end.");
+                    AppHandler._callback_search(args);
+                    return false;
+                }
+                args.p = (this.current_qs[args.qs]+=1);          
+            }else{
+                args.p = this.current_qs[args.qs] = 1;
+            }
+        }
+        $("#grayout").fadeIn(10);
+
+        if(args.by == "genre")
+            AppServer.search_by_genre(args);
+        else
+            AppServer.search(args);
+        return false;
+    },
+    genres :function () {
+        this.init();
+        AppPage.init("genre");
+        $("#to_genre").hide();
+        $("#b_more").hide();
+        AppServer.genres();
+    },
+    set_ids :function(h){
+        //        AppUtil.debug("PLAYLIST CHANGE");// + this.status.ids_title.join("<br/>"));
+        this.status.ids = [];
+        for(x in h){
+            this.status.ids.push(h[x]._id);
+        }
+        return this.status.ids;
+    },
+    set_store : function(midskey){
+        $.ajax({  
+                   type   : "POST",
+                   async  : true,
+                   data   : {midskey:midskey},
+                   url    : "<%= @prefix %>/api/files/set_store" ,
+                   success: function(msg){
+                       alert(msg.status + ":" + msg.msg );
+                       $("#store").click(function(){}).html("stored");
+                   },
+                   error : function(){
+                   }
+               });
+    },
+    _web_m3u : function(kind,name){
+        $("#grayout").fadeIn(10);
+        if(kind == "page"){
+            // 表示中のtitleのliで作る
+            var h = {};
+            $("#title li:visible").each(function(){
+                                            h[this.id] = {_id : $(this).attr("_id")};
+                                        });
+        }else{
+            // memo : 表示状態をつかわないのは可用性を高めるため。
+            // 表示状態に依存しない様に。
+            var h = AppPage.elements.find("title").query(kind).is(name);
+        }
+        var ids = this.set_ids(h).join(' ');
+        return ids;
+    },
+    m3u : function(kind,name){
+        var ids = this._web_m3u(kind,name);
+        if(ids.length < 3){ 
+            $("#grayout").hide(); 
+            AppUtil.debug("No PLAYLIST");
+            return;
+        }
+        $("#m3u_ids").val(ids);
+        $("#frm_m3u").get(0).submit();
+        $("#grayout").hide(); 
+    },
+    web : function(kind,name){
+        var ids = this._web_m3u(kind,name);
+        if(ids.length < 3){ 
+            $("#grayout").hide(); 
+            AppUtil.debug("No PLAYLIST");
+            return;
+        }
+
+        $.ajax({  
+                   type   : "POST",
+                   async  : false,
+                   data   : {"mids":ids},
+                   url    : "<%= @prefix %>/api/files/set_mids" ,
+                   success: function(msg){
+                       AppHandler.do_pretty('<%= @prefix %>/files/'+ msg.midskey,"files",msg.midskey);
+                       $("#grayout").fadeOut(10);
+                   },
+                   error : function(){
+                       $("#grayout").fadeOut(10);
+                   }
+               });
+    },
+    pclose : function(){
+        if($("iframe").contents().find("audio").get(0)){
+            $("iframe").contents().find("audio").get(0).pause();
+            $("iframe").contents().find("audio").get(0).src = "";
+        }
+    },
+    pwopen :function(_this){
+        $.prettyPhoto.close();
+        AppHandler.wopen(_this);
+    },
+    wopen : function(_this){
+        window.open( _this.href, 'new' );
+        return false;
+    },
+    popen :function(_this){
+        AppHandler.do_pretty(_this.href);
+    },
+    do_pretty :function (link,mode,midskey){
+        var html = "<a href=\"" + link + "\" target=\"_blank\" onclick='AppHandler.pwopen(this);return false;' > link </a>";
+        if(mode == "files"){
+            html += "<a href=\"javascript:void();\"id=\"store\" style=\"marign-left:5px;\" onclick=\"AppHandler.set_store(\'" + midskey +  "\');return false;\"> store </a>";
+        }
+console.log(html);
+        $.prettyPhoto.open(
+            link,
+            'pretty',
+            html
+        );
+    },
+    callback_search :function(status,json,mode){
+        if(status.next == "no"){
+            AppHandler.current_qs["s:" + status.qs] = "ended";
+            $("#b_more").hide();
+        }else
+            $("#b_more").show();
+        
+        AppPage.register(status,json);
+        AppHandler._callback_search(status,"search");
+    },
+    callback_search_by_genre :function(status,json,mode){
+        if(status.next == "no")
+            AppHandler.current_qs[status.qs] = "ended";
+
+        if(mode == "proxy"){
+            AppPage.register(status,json);
+            return AppHandler.search({by:"genre",qs: status.qs});
+        }
+
+        AppPage.register(status,json);
+        AppHandler._callback_search(status,"genre");
+
+        return false;
+    },
+    _callback_search :function(status,mode){
+        AppHandler.status.displaystack = {"genre":false,"artist":true,"album":true,"title":true};
+        if(mode == "search"){
+            for(x in AppPage.target){
+                $("#" + x + " h2").css({"padding-top":0});
+            }
+            AppHandler.status.displaystack.genre = true;            
+        }
+
+        for(x in AppHandler.status.displaystack){
+            if(AppHandler.status.displaystack[x]){
+                (function(x,status){
+                     setTimeout(function(){
+                                    //                                    AppPage.target[x].find("li").hide();
+                                    AppPage.pain_by({kind:x,status:status});
+                                },2);
+                 })(x,status);
+            }
+        }
+        //        console.log("count:" + AppPage.elements.counts);
+        $("#counts").html("(<span class='old' style='color:#00863D;'>" + AppPage.elements.counts + "</span>/<span class='old' style='color:#000;'>"+ status.total + "</span>)");       
+    },
+    callback_genre :function(status,json){
+        AppPage.registerg(status,json);
+        AppPage.make_genre_pain();
+    }
+};
+function init(){
+    AppUtil.applyToSystem();
+    $.fn.prettyPhoto(); 
+    AppHandler.genres();
+    $("#wrapper").find("h2").click(
+        function(){
+            var targ = $(this).closest("div").find("ul");
+            var ret = targ.find("li").sort(function(a,b){return 1;});
+            targ.append(ret);
+        });
+
+}
+
+$(function(){
+      init();
+  });

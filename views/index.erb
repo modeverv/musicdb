@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+<!--    <meta http-equiv="Expires" content="<%=60*60*12%>">-->
+    <title><%= title %></title>
+    <link rel="icon" href="http://ja.gravatar.com/userimage/14611836/d5caef2a5366cf647fc8fba3430e5854.png" type="image/png">
+    <!--[if lt IE 9]>
+    <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <script src=http://ie7-js.googlecode.com/svn/version/2.1(beta4)/IE9.js"></script>
+    <![endif]-->
+    
+    <link rel="stylesheet" href="<%= @prefix %>/css/pc.css" type="text/css" media="screen" />
+    <link rel="stylesheet" href="<%= @prefix %>/css/prettyPhoto.css" type="text/css" media="screen" />
+    <link rel="stylesheet" href="<%= @prefix %>/jquery.jgrowl.css" type="text/css" media="screen" />
+
+    
+    <link href="<%= @prefix %>/iphone.css" rel="stylesheet" type= "text/css" media="only screen and (max-device-width: 480px)">
+
+  </head>
+  <body>
+    <div id="grayout">
+      <img id="loadergif" src="<%= @prefix %>/images/loader.gif" width="128px" height="128px" alt="Loading..">
+    </div>
+
+    <header>
+      <div id="apptitle"><a href="<%= @prefix %>/"><h1 class="logo"><%= title %><span id="counts"></span></h1></a></div>
+      <div id="echoarea"></div>
+      <div id="search" class="search">
+        <form id="frm_search" onsubmit="AppHandler.search({by:'search'});return false;">
+           <input type="button" id="b_search" class="submit_button"  onclick="AppHandler.search({by:'search'});return false;"  value="Search">
+          <input type="text" class="text_field" value="FeelingLucky" id="f_query"/>
+        </form>
+        <div id="pagination">
+           <input type="button" id="b_more" class="submit_button" onclick="AppHandler.search({by:'more'});return false;" value="More" />
+        </div>
+      </div>
+      <div class="clearboth"></div>
+      <div id="m3u">
+        <form id="frm_m3u" onsubmit="return false;" action="<%= @prefix %>/api/m3u" method="post" name="m3u">
+          <input type="hidden" name="qs" value='' id="m3u_ids" />
+        </form>
+          <a class="submit_a" href="<%= @prefix %>/welcome" onclick="AppHandler.popen(this);return false;">help</a>
+          <a class="submit_a" href="<%= @prefix %>/stored" onclick="AppHandler.popen(this);return false;">stored</a>
+          <a class="submit_a" href="<%= @prefix %>/statistics" onclick="AppHandler.popen(this);return false;">statistics</a>
+          <input type="button" class="submit_button" onclick="AppHandler.web('page');return false;" value="web" >
+          <input type="button" class="submit_button" onclick="AppHandler.m3u('page');return false;" value="m3u" >
+          <input id="to_genre" type="button" class="submit_button" onclick="AppHandler.genres();return false;" value="genres">
+      </div>
+    </header>
+
+    <div id="wrapper">
+      <div id="genre">
+        <h2>
+          <span class='normal'>GENRE</span>
+          <span class='hover'>SORT</span>
+        </h2>
+        <ul></ul>
+      </div>
+      
+      <div id="artist">
+        <h2>
+          <span class='normal'>ARTIST</span>
+          <span class='hover'>SORT</span>
+        </h2>
+        <ul></ul>
+      </div>
+      
+      <div id="album">
+        <h2>
+          <span class='normal'>ALBUM</span>
+          <span class='hover'>SORT</span>
+        </h2>
+        <ul></ul>
+      </div>
+      
+      <div id="title">
+        <h2>
+          <span class='normal'>TITLE</span>
+          <span class='hover'>SORT</span>
+        </h2>
+        <ul></ul>
+      </div>
+    </div>
+
+    <footer>
+      <p id="echo_pool">modeverv＠gmail.com</p>
+    </footer>
+    
+    <script src="<%= @prefix %>/jquery.js"></script>
+<!--    
+    <script src="http://cdn.jquerytools.org/1.2.6/jquery.tools.min.js"></script>
+-->    
+    <script src="<%= @prefix %>/jquery.jgrowl.js"></script>
+    <script src="<%= @prefix %>/scripts/jquery.prettyphoto.js"></script>
+    <script><% if @config == "sinatra" %>
+        var  config = "sinatra";
+    <% else %>
+      var  config = "websocket";
+    <% end %></script>
+    <script src="<%= @prefix %>/scripts/application.js"></script>
+    
+    
+  </body>
+</html>
+
+

@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title><%= title %>::files</title>
+    <link rel="icon" href="http://ja.gravatar.com/userimage/14611836/d5caef2a5366cf647fc8fba3430e5854.png" type="image/png">
+    <!--[if lt IE 9]>
+    <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <script src=http://ie7-js.googlecode.com/svn/version/2.1(beta4)/IE9.js"></script>
+    <![endif]-->
+    <link href="<%= @prefix %>/css/pc.css"  rel="stylesheet" type= "text/css" media="screen">
+    <link href="<%= @prefix %>/css/swf.css" rel="stylesheet" type= "text/css" media="screen">
+    <link href="<%= @prefix %>/jquery.jgrowl.css" rel="stylesheet" type="text/css" media="screen" />
+   
+  </head>
+  <body>
+    <div class="leftbottom">
+      <h1 class="logo"><a href='<%= @prefix %>'><%= title %></a>::play</h1>
+      <div id="similar"></div>
+    </div>
+    <div id="vlc1">
+      <audio  id='audio' width='100%' preload autoplay controls src="http://<%= request.host%>:<%= request.port %><%= @prefix %>/static/html5media/media/audio.mp3"></audio>
+    </div>
+
+    <div id="lyric">
+    </div>
+    
+    <div id="main">
+      <div id="play"><div id="a_image"></div><div id="s_play"></div></div>
+      <section id="m_title"></section>
+      <section id="m_artist"></section>
+      <section id="m_album"></section>
+      <section id="m_genre"></section>
+      <section id="m_tag"></section>
+      <section id="m_path"></section>
+      <section id="m_url"></section>
+    </div>
+
+    <script src="<%= @prefix %>/jquery.js"></script>
+    <script src="http://cdn.jquerytools.org/1.2.6/jquery.tools.min.js"></script>   
+    <script src="<%= @prefix %>/static/flowplayer-3.2.6.min.js"></script>
+    <script src="<%= @prefix %>/jquery.text-effects.js"></script>
+    <script src="<%= @prefix %>/jquery.jgrowl.js"></script>   
+    <script src="<%= @prefix %>/static/html5media/api/html5media.min.js"></script>
+    <script>
+      mret = <%= @mret %>;
+    </script>
+    <script src="<%= @prefix %>/scripts/jsfiles.js"></script>
+
+    <script src="<%= @prefix %>/processing.min.js"></script>
+    <script src="<%= @prefix %>/modernizr-0.9.min.js"></script>
+    
+    </body>
+</html>
+
+
+
+
+

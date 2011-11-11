@@ -1,0 +1,321 @@
+/* firyes */
+function d(s){
+    //  $.jGrowl(s,{life:500});
+    $.jGrowl(s,{position:"bottom-left"});
+}
+//var names = [];
+function do_introduction(){
+    $("#pl").fadeOut(0);
+    var html = [];
+    for(var i=0,l=mret.length;i<l;i++){
+        var ele = "<span class=\"e_pl\" onclick=\"play(#{cursor})\">".replace('#{cursor}',i) + mret[i].title + "</span>";
+        html.push(ele);
+    }
+    $("#pl").html(html.join('<br/>')).fadeIn(0);
+    $($(".e_pl")[cursor]).addClass("e_pl_now");
+}
+var visu =false;
+function do_visualize(){
+    d("do visualize seed detect");
+    visu = true;    // make canvas
+    $('body').append('<canvas style="z-index:0;width:100%;height:100%;" id="theapt" height="100%" width="100%"></canvas>');
+    $('#main').css({
+                       "color":"#fff"
+                   });
+    $('#lyric').css({
+                        "color":"#fff"
+                    });
+    $("body").css({
+                      "overflow":"hidden"
+                  });
+    $("#bio a").css({
+                        "color":"#fff"
+                    });
+    $("#word a").css({
+                         "color":"#fff"
+                     });
+    $("#wikipedia a").css({
+                              "color":"#fff"
+                          });
+
+    // load need file
+    var loadjs = function(src){
+        var ele = document.createElement("script");
+        ele.type = "text/javascript";
+        ele.src = src;
+        document.body.appendChild(ele);    
+    };
+
+    var apt18 = "<%= @prefix %>/apt18.js";
+    loadjs(apt18);
+}
+function get_a_img(title,artist,album){
+    $("#a_image").html("");
+    $.ajax({
+               url:'<%= @prefix %>/api/scrape/amazon',
+               data:{"artist":artist,"album":album},
+               success:function(msg){
+                   if(msg.status == "ok"){
+                       d("get image ok");
+
+                       $("#a_image").fadeOut(500,
+                                             function(){
+                                                 $("#a_image").html("<img src='"+ msg.src + "' alt='img'/>");
+                                                 setTimeout(function(){$("#a_image").fadeIn(500);},1000);
+                                             });
+                   }
+               }
+           });
+}
+
+function get_rylic(title,artist,album,index){
+    $("#word").html("");
+    $.ajax({
+               url:'<%= @prefix %>/api/scrape/lyric',
+               data:{"title":title,"artist":artist},
+               success:function(msg){
+                   if(msg.html != ""){
+                       d("get rylic ok");
+
+                       $("#word").html(msg.html);
+                       wordok = true;
+                       if(visu)
+                           $("#word a").css({"color":"#fff"});
+                   }
+               }
+           });  
+}
+
+function get_bio(title,artist,album,index){
+    $("#bio").html("");
+    $.ajax({
+               url:'<%= @prefix %>/api/scrape/bio',
+               data:{"artist":artist},
+               success:function(msg){
+                   if(msg.html != ""){
+                       d("get bio ok");
+                       $("#bio").html(msg.html);
+                       biook = true;
+                       if(visu)
+                           $("#bio a").css({"color":"#fff"});
+
+                   }
+               }
+           });  
+}
+function get_statistics(mid,name){
+    $.ajax({
+               url:'<%= @prefix %>/api/statistics',
+               data:{mid:mid,name:name,t:(new Date)/1},
+               success:function(msg){/*console.log(msg);*/}
+           });  
+}
+
+var similars = {};
+function get_similar(title,artist,album,index){
+    $.ajax({
+               url:'<%= @prefix %>/api/scrape/similar',
+               data:{"artist":artist},
+               success:function(msg){
+                   if(msg.status == "ok"){
+                       json = msg.json;
+                       similar = $("#similar");
+
+                       for(var i=0;i< json.length;i++){
+                           if(!similars[json[i].name]){
+                               d("new similar artist detect:" + json[i].name );
+                               //json[i].name;
+                               //json[i].image;
+                               var img = $("<img src='"+json[i].image + "' alt='"+ json[i].name + "' title='" + json[i].name + "'>");           
+
+                               img.click(function(){
+
+                                             d("now attempt generate playlist");
+                                             get_generate_midskey_from( $(this).attr("alt") );
+                                         });
+                               
+                               img.hover(
+                                   function(){
+                                       var _klass = visu ? "white" : "black";
+                                       $(this).addClass("highlight").tooltip({tipClass:_klass});
+                                   },
+                                   function(){ $(this).removeClass("highlight");}
+                               );
+                               similar.append(img);
+                               similars[json[i].name] = true;
+                           }
+                       }
+                   }
+               }
+           });  
+}
+
+function get_generate_midskey_from(artist){
+    $.ajax({
+               url:'<%= @prefix %>/api/files/generate_midskey_from',
+               data:{"artist":artist},
+               success:function(msg){
+                   if(msg.status == "ok"){
+                       d("generate playlist ok, now loading.");
+                       location.href = "<%= @prefix %>/files/" + msg.midskey;
+                   }else{
+                       d("generate playlist ng. why?");
+                       alert(msg.message);
+                   }
+               }
+           });  
+    
+}
+
+
+function get_wikipedia(title,artist,album,index){
+    $.ajax({
+               url:'<%= @prefix %>/api/scrape/wikipedia',
+               data:{"artist":artist},
+               success:function(msg){
+                   if(msg.html != ""){
+                       d("get wikipedia entry");
+                       $("#wikipedia").html(msg.html);
+                       wikipediaok = true;
+                       if(visu)
+                           $("#wikipedia a").css({"color":"#fff"});
+                   }
+               }
+           });  
+}
+
+function play_next(){
+    cookie_shift();
+    play(cursor,true);
+}
+
+function docwrite(json){
+    $("title").html("<%= title %>::files " + json.title + " - " + json.album + " - " + json.artist );
+    html = $("<p>" + json.title + " </p>");
+    $("#m_title").html(html);
+    html.typewriter();
+    $("#m_album").html(json.album);
+    $("#m_genre").html(json.genre);
+    $("#m_artist").html(json.artist);
+    $("#m_tag").html(json.tag);
+    $("#m_path").html(json.path);
+//    var url = "http://" + location.host  + "<%= @prefix %>/api/stream2/" + json._id + "/file." + json.ext ;
+    var url = "http://" + location.host  + "/stream/musicdb/" + json._id + "/file." + json.ext ;
+//    var url = "http://" + location.host + json.path.replace("/var/smb/sdb1","/resource")  ;
+//    var url = json.path.replace("/var/smb/sdb1","/resource");
+    
+    $("#m_url").html(url);
+    d(url);
+    get_a_img    (json.title,json.artist,json.album);
+    get_rylic    (json.title,json.artist,json.album);
+    get_bio      (json.title,json.artist,json.album);
+    get_similar  (json.title,json.artist,json.album);
+    get_wikipedia(json.title,json.artist,json.album);
+    get_statistics(json._id,"WEB:" + json.title + " - " + json.album + " - " + json.artist);
+    try{
+        $f("audio").play(url);
+    } catch(x) {
+    }
+    try{
+        document.getElementById('audio').src = url;
+        document.getElementById('audio').play();
+    } catch (x) {
+    }
+    d("loading :" + json.title);
+    $("#s_play").html("playing");
+}
+var cursor = null;
+function cookie_shift(){
+    var mid = mret[cursor];
+    cursor = (cursor+1) % mret.length;
+    return mid;        
+}
+var wordok = false;
+var biook = false;
+var wikipediaok = false;
+var nowlyric = "#pl";
+var st = 1;
+$(function(){
+      var seed = Math.floor(Math.random()*10 + 1);
+      if(seed > 7)
+          do_visualize();
+      
+      $("#lyric").append("<div id=\"word\"></div>");
+      $("#lyric").append("<div id=\"pl\"></div>");
+      $("#lyric").append("<div id=\"bio\"></div>");
+      $("#lyric").append("<div id=\"wikipedia\"></div>");
+
+      play(0);
+      try{ $("#audio").get(0).addEventListener( "ended", function(){
+                                                    play_next();
+                                                }, false);} catch (x) {}
+      setTimeout(
+          function(){
+              try{
+                  $f("audio").onFinish( function(){ play_next();} );
+              } catch (x) {
+              }
+          },2000);
+      my_interval();
+  });
+function my_interval(){
+    var testNext = function(){
+        var ret = ["#pl"];
+        if(wordok)
+            ret.push("#word");
+        if(biook)
+            ret.push("#bio");
+        if(wikipediaok)
+            ret.push("#wikipedia");
+        return ret;
+    };
+
+    setInterval(
+        function(){
+            try{
+                var nexta = testNext();
+                if(nexta.length == 1)
+                    return;
+                for(var i=0,s=0;i < nexta.length;i++){
+                    if(nowlyric == nexta[i]){
+                        s = (i+1) % nexta.length;
+                        nowlyric = nexta[s];
+                        $(nexta[i]).fadeOut(1500,
+                                            function(){
+                                                $(nexta[s]).fadeIn(1500);
+                                            });
+                        break;
+                    }
+                }
+            } catch (x) {
+                $("#word").fadeOut(10);
+                $("#bio").fadeIn(10);
+                $("#wikipedia").fadeIn(10);
+                $("#pl").fadeIn(10);
+            }
+        },10000);
+}
+
+function play(cur){
+    wordok = false;
+    biook = false;
+    wikipediaok = false;
+    $("#word").fadeOut(500,function(){$("#pl").fadeIn(500);});
+    cursor = cur;
+    $("#s_play").html("Now Loading ...");
+    $("title").html("<%= @prefix %>::files Now Loading ...");
+    do_introduction();
+    var mid = mret[cur];
+    if(mid.ext == "ape" ||
+       mid.ext == "flac" ||
+       mid.ext == "mka" ||
+       mid.ext == "tta" ||
+       mid.ext == "tak" 
+      ){
+          d("can't play " + mid.ext + " try next.");
+
+          return  play_next();
+      }
+    return docwrite(mid);
+}
+

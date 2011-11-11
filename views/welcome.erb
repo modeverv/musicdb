@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title><%= title %>::welcome</title>
+    <link rel="icon" href="http://ja.gravatar.com/userimage/14611836/d5caef2a5366cf647fc8fba3430e5854.png" type="image/png">
+    <!--[if lt IE 9]>
+    <script src="http://html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <script src=http://ie7-js.googlecode.com/svn/version/2.1(beta4)/IE9.js"></script>
+    <![endif]-->
+    <link rel="stylesheet" href="<%= @prefix %>/css/pc.css" type="text/css" media="screen" />
+    <script type="text/javascript" src="<%= @prefix %>/jquery.js"></script>
+    
+<style>
+  #wrapper h2 {cursor :default }
+</style>  
+<style>
+  h1.logo{margin:0;padding:0;}
+  header ,#wrapper,footer{
+    margin:0 auto;
+    padding:0;
+    width:750px;
+  }
+  header{
+    margin-top:20px;
+  }
+  #wrapper{
+    padding-top:20px;
+  }
+  .submit_button{
+    margin-right:4px;
+  }
+  table{
+    width:780px;
+    padding:5px;
+  }
+  #m3u{
+    display:block;
+  }
+  table a:hover{
+     color:#E90955;
+     text-decoration:underline;
+  }
+  #apptitle a:visited,#apptitle a:hover{
+  }
+  table a{color:#111;}
+  #wrapper{margin-top:10px;}
+  #wrapper p {
+    margin-bottom:20px;
+  }
+  #wrapper h1 {
+    margin:0 20px 0 0;
+    padding:0;
+  }
+</style>  
+    
+  </head>
+  <body>
+    <header>
+      <div id="apptitle"><h1 class="logo"><a href="<%=get_prefix%>/"><%= title %></a>::welcome</h1></div>
+    </header>
+    <div class="clearboth"></div>
+    <div id="wrapper">
+      <h1>welcome</h1>
+		<p>私の音楽ライブラリの再生webページです。celeronM世代のファイルサーバーではSubSonicが重くてしんどいので作りました。MongoDB,rubyで作成しています。ファイルの転送にはnode.jsを使っています(試験的)。</p>
+        
+      <h1>usage</h1>
+		<p>好みのファイルを探すためにメタタグを基準にしたリストを絞り込んでいくか検索を行なってください。ジャンル、アーティスト、アルバム、タイトルにマウスをもっていくと「m」と「w」の文字が表示されるのでクリックしてください。「m」はm3uファイルのダウンロード、「w」はweb上での再生です。ページ上部のm3u/webボタンは現在絞り込み中のリストについてm3uファイルのダウンロード/web上での再生が機能します。statisticsは再生数の統計です。storedはweb上での再生の場合にstoreした時のstore済みリストの閲覧です。helpはこのページです。</p>
+        
+      <h1>function</h1>
+		<p>メタタグに従ったライブラリの閲覧、m3uファイルの生成とダウンロード、ライブラリの検索、各ファイルのwebページ上での再生が可能です。絞り込んだ結果はstoreが可能です。</p>
+        
+      <h1>rights</h1>
+		<p>サーバーは日本国内にあるので著作権対象物をインターネット上に公然と公開することはアウトです。basic認証などをつけるとOKかもしれませんがわかりません。このページはアウトです。どうしましょう?</p>
+        
+      <h1>todo</h1>
+		<p>いつかiphone対応したいです。web上での再生がflowplayer/audioタグの対応ファイルに限定されるので(SubSonicと同じように)トランスコーディングをして配信したいところです。トランスコーディングはサーバーの性能上使いものにならないのでどうにもならないところです。</p>
+    </div>
+    
+    <footer>
+      <p id="echo_pool">modeverv＠gmail.com</p>
+    </footer>
+  </body>
+</html>
+
+
